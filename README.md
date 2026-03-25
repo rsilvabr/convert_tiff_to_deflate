@@ -21,22 +21,27 @@ Both `magick.exe` and `exiftool.exe` must be on your PATH.
 
 ---
 
+## Disclaimer
+
+These tools were made for my personal workflow (with the help of Claude). Use at your own risk — I am not responsible for any issues you may encounter.
+If you choose to use it and find any errors/bugs, please let me know.
+
+---
+
 ## Quick start
 
 ```powershell
 # Navigate to the folder with your TIFFs, then run:
 .\compress_tiff_zip.ps1
+```
 
-OR
+Alternatively, copy the entire script, open a new PowerShell 7 terminal in the folder
+containing your TIFFs, paste and press Enter. No file installation needed.
 
-# Copy the entire source code, open a new terminal in the folder,
-# paste the code and press enter. 
-
-# To preview without changing anything, set $DryRun = $true at the top
-
-# Recursive mode is $true by defaul, i.e., it will convert TIFF files in all subfolders recursively.
-# Change recursive mode to $false if you don't want to affect the subfolders.
-
+```powershell
+# To preview without changing anything, set $DryRun = $true at the top.
+# Recursive mode is $true by default — all subfolders are processed.
+# Set $Recurse = $false to process only the current folder.
 ```
 
 ---
@@ -93,8 +98,8 @@ The IR channel is referenced by a proprietary byte-offset pointer (tag `0x89ab`)
 After recompression, the data moves to a different byte position — the pointer becomes
 invalid and SilverFast can no longer find the IR channel. Dust removal stops working.
 
-**Photoshop layered TIFFs** Untested. Has riscs, because it may use proprietary Adobe 
-structures across multiple IFDs that external tools may not preserve correctly. 
+**Photoshop layered TIFFs** — untested, but may use proprietary Adobe structures across
+multiple IFDs that external tools do not preserve correctly.
 
 Multi-page files are listed at the end of the log with their full paths, so you can
 review and decide what to do with each one manually.
@@ -104,14 +109,12 @@ TIFFs — for example, pure camera exports from Capture One or NX Studio.
 
 ---
 
-## Using the script with Capture One or other Softwares
+## Using with Capture One
 
-```
-I use Capture One in my workflow, and im my experience I can use the script to convert
-TIFF photos that are beind edited (as input in C1), without any problems.
-Colors, edits, everything is kept - i never needed not even to close the C1 software. 
-Other softwares may be different, so please test with a few files before committing a large library.
-```
+In my experience, the script works fine on TIFFs that are actively being used as
+input in Capture One — colors, edits, and adjustments are all preserved, and I never
+needed to close Capture One before running it. Other software may behave differently,
+so test with a few files before processing a large library.
 
 ---
 
