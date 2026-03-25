@@ -27,7 +27,16 @@ Both `magick.exe` and `exiftool.exe` must be on your PATH.
 # Navigate to the folder with your TIFFs, then run:
 .\compress_tiff_zip.ps1
 
+OR
+
+# Copy the entire source code, open a new terminal in the folder,
+# paste the code and press enter. 
+
 # To preview without changing anything, set $DryRun = $true at the top
+
+# Recursive mode is $true by defaul, i.e., it will convert TIFF files in all subfolders recursively.
+# Change recursive mode to $false if you don't want to affect the subfolders.
+
 ```
 
 ---
@@ -92,6 +101,17 @@ review and decide what to do with each one manually.
 
 Use `$SafeMode = $false` only if you are certain your collection contains no multi-page
 TIFFs — for example, pure camera exports from Capture One or NX Studio.
+
+---
+
+## Using the script with Capture One or other Softwares
+
+```
+I use Capture One in my workflow, and im my experience I can use the script to convert
+TIFF photos that are beind edited (as input in C1), without any problems.
+Colors, edits, everything is kept - i never needed not even to close the C1 software. 
+Other softwares may be different, so please test with a few files before committing a large library.
+```
 
 ---
 
