@@ -55,6 +55,10 @@ $SafeMode   = $true
 # true  → skip multi-page TIFFs (recommended — see Safe Mode section below)
 # false → compress all TIFFs including multi-page ones
 
+$SkipLzwAsCompressed = $false
+# true = treat LZW as already compressed (skip ZIP re-compression)
+# false (default) = convert LZW → ZIP
+
 $Recurse    = $true
 # true  → process TIFFs in all subfolders recursively
 # false → only process TIFFs in the current folder
@@ -156,7 +160,7 @@ Done: 45 OK | 3 skipped | 2 multi-page (not touched) | 0 errors | 50/50 processe
 
 ## Notes
 
-- Already-compressed TIFFs (Deflate/ZIP/Adobe) are automatically skipped
+- Already-compressed TIFFs (Deflate/ZIP/Adobe) are automatically skipped (LZW if `$SkipLzwAsCompressed = $true`)
 - EXIF is verified after compression — if ImageMagick dropped it, exiftool restores it from the original
 - All exiftool calls use `-@` argument files to handle folder names with brackets like `[FINAL]`
 - Tested with PowerShell 7.6, Windows 11

@@ -4,13 +4,30 @@ $DryRun     = $false
 $Recurse    = $true
 $SafeMode   = $true      # true  → skip multi-page TIFFs (scanner IR, Photoshop layers)
                           # false → compress all TIFFs including multi-page ones
+$SkipLzwAsCompressed = $false  # true = treat LZW as already compressed (skip ZIP re-compression)
+                          # false = re-compress LZW to ZIP (default)
 $OutputDir  = ""          # ""          = overwrite original in place
                           # "tiff_zip"  = create subfolder per group
                           # "F:\ZIP"    = absolute output path
 $StagingDir = ""          # ""          = disabled
                           # "E:\staging" = write here, move to final destination after each group
 $Overwrite  = $false
+$MagickTimeout = 30       # seconds timeout for magick identify (prevents hang on corrupted files)
 # ──────────────────────────────────────────────────────────────────
+
+# ── Cleanup on interrupt ─────────────────────────────────────────
+$script:cleanupDirs = @()
+if ($StagingDir) { $script:cleanupDirs += $StagingDir }
+
+trap {
+    Write-Log "Interrupted! Cleaning up staging files..." "WARN"
+    foreach ($dir in $script:cleanupDirs) {
+        if (Test-Path -LiteralPath $dir) {
+            Remove-Item -Path "$dir\*" -Force -ErrorAction SilentlyContinue
+        }
+    }
+    break
+}
 
 # ── Logging ───────────────────────────────────────────────────────
 $scriptName = "compress_tiff_zip"
@@ -88,6 +105,10 @@ if ($script:total -eq 0) {
 
         $safeL        = $SafeMode
         $multiPageBag = $script:multiPagePaths
+        $skipLzwL     = $SkipLzwAsCompressed
+
+        # Build staging map to track UUID -> original filename
+        $script:stagingMap = @{}
 
         $job = $groupFiles | ForEach-Object -Parallel {
             $src       = $_.FullName
@@ -98,39 +119,53 @@ if ($script:total -eq 0) {
             $overL     = $using:Overwrite
             $safeMode  = $using:safeL
             $bagL      = $using:multiPageBag
+            $skipLzw   = $using:skipLzwL
 
-            $writeDst = Join-Path $writeDirL $name
+            $stagingName = "$([guid]::NewGuid().ToString('N'))_$name"
+            $writeDst = Join-Path $writeDirL $stagingName
             $finalDst = Join-Path $finalDirL $name
 
             # Check current compression (uses -@ to handle brackets in path names)
             $argComp = [System.IO.Path]::GetTempFileName()
             [System.IO.File]::WriteAllText($argComp, "-s`n-s`n-s`n-Compression`n$src`n")
             $comp = exiftool -@ $argComp 2>$null
+            $exifExit = $LASTEXITCODE
             Remove-Item $argComp -Force
-            if ($comp -match 'Deflate|ZIP|Adobe') { return "SKIP ($comp) | $name" }
+            if ($exifExit -ne 0 -or -not $comp) {
+                return @{ Result = "ERROR (exiftool check) | $name | cannot detect compression"; StagingName = $null; OriginalName = $name }
+            }
+            if ($comp -match $(if ($skipLzw) { 'Deflate|ZIP|Adobe|LZW' } else { 'Deflate|ZIP|Adobe' })) { 
+                return @{ Result = "SKIP ($comp) | $name"; StagingName = $null; OriginalName = $name }
+            }
 
             # Check if output already exists
             if ((Test-Path -LiteralPath $finalDst) -and -not $overL -and ($finalDst -ne $src)) {
-                return "SKIP (exists) | $name"
+                return @{ Result = "SKIP (exists) | $name"; StagingName = $null; OriginalName = $name }
             }
 
             # Safe mode: detect and skip multi-page TIFFs before touching them.
-            # Multi-page TIFFs include: scanner RGB+IR files (SilverFast), Photoshop layered files.
-            # Compressing them with external tools breaks internal byte-offset pointers
-            # and proprietary tags — e.g. SilverFast loses its IR dust-removal channel.
             if ($safeMode) {
-                $pageCount = (magick identify $src 2>$null | Measure-Object -Line).Lines
+                $magickTimeoutSec = 30  # Fixed timeout for magick identify
+                $pageCountJob = Start-Job { magick identify $using:src 2>$null }
+                $pageCountJob | Wait-Job -Timeout $magickTimeoutSec | Out-Null
+                if ($pageCountJob.State -eq 'Running') {
+                    Stop-Job $pageCountJob
+                    Remove-Job $pageCountJob
+                    return @{ Result = "ERROR (magick timeout) | $name | possibly corrupted"; StagingName = $null; OriginalName = $name }
+                }
+                $pageCount = ($pageCountJob | Receive-Job | Measure-Object -Line).Lines
+                Remove-Job $pageCountJob
                 if ($pageCount -gt 1) {
                     $bagL.Add($src) | Out-Null
-                    return "MULTI ($pageCount IFDs — skipped) | $name"
+                    return @{ Result = "MULTI ($pageCount IFDs — skipped) | $name"; StagingName = $null; OriginalName = $name }
                 }
             }
 
-            if ($dryL) { return "DRY ($comp → ZIP) | $name" }
+            if ($dryL) { return @{ Result = "DRY ($comp → ZIP) | $name"; StagingName = $null; OriginalName = $name } }
 
             # Compress with ImageMagick
             $out = magick -quiet $src -compress zip $writeDst 2>&1
-            if ($LASTEXITCODE -ne 0) { return "ERROR (magick) | $name | $out" }
+            if ($LASTEXITCODE -ne 0) { return @{ Result = "ERROR (magick) | $name | $out"; StagingName = $null; OriginalName = $name } }
 
             # Verify EXIF was preserved (magick usually keeps it, but check)
             $argExif = [System.IO.Path]::GetTempFileName()
@@ -144,29 +179,49 @@ if ($script:total -eq 0) {
                 [System.IO.File]::WriteAllText($argCopy, "-q`n-q`n-overwrite_original`n-tagsfromfile`n$src`n-all:all`n-unsafe`n$writeDst`n")
                 exiftool -@ $argCopy | Out-Null
                 Remove-Item $argCopy -Force
-                if ($LASTEXITCODE -ne 0) { return "WARN (exiftool failed, ZIP ok) | $name" }
+                if ($LASTEXITCODE -ne 0) { return @{ Result = "WARN (exiftool failed, ZIP ok) | $name"; StagingName = $stagingName; OriginalName = $name } }
             }
 
-            return "OK ($comp → ZIP) | $name"
+            return @{ Result = "OK ($comp → ZIP) | $name"; StagingName = $stagingName; OriginalName = $name }
 
         } -ThrottleLimit $Workers -AsJob
 
         while ($job.State -eq 'Running') {
-            Process-Results (Receive-Job $job)
+            $results = Receive-Job $job
+            foreach ($r in $results) {
+                if ($r.StagingName) { $script:stagingMap[$r.OriginalName] = $r.StagingName }
+                Process-Results @($r.Result)
+            }
             Start-Sleep -Milliseconds 300
         }
-        Process-Results (Receive-Job $job)
+        $finalResults = Receive-Job $job
+        foreach ($r in $finalResults) {
+            if ($r.StagingName) { $script:stagingMap[$r.OriginalName] = $r.StagingName }
+            Process-Results @($r.Result)
+        }
         Remove-Job $job
 
-        # Move from staging to final destination
+        # Move from staging to final destination (with integrity check)
         if ($StagingDir -and -not $DryRun) {
             $moved = 0
             foreach ($f in $groupFiles) {
-                $stagePath = Join-Path $StagingDir $f.Name
-                $destPath  = Join-Path $finalDir   $f.Name
+                # Use the UUID-mapped staging name, not the original name
+                $originalName = $f.Name
+                if (-not $script:stagingMap.ContainsKey($originalName)) { continue }
+                
+                $stagingName = $script:stagingMap[$originalName]
+                $stagePath = Join-Path $StagingDir $stagingName
+                $destPath  = Join-Path $finalDir   $originalName
+                
                 if ((Test-Path -LiteralPath $stagePath) -and $stagePath -ne $destPath) {
+                    $stageSize = (Get-Item -LiteralPath $stagePath).Length
                     Move-Item -Force -LiteralPath $stagePath -Destination $destPath
-                    $moved++
+                    # Verify move succeeded
+                    if ((Test-Path -LiteralPath $destPath) -and ((Get-Item -LiteralPath $destPath).Length -eq $stageSize)) {
+                        $moved++
+                    } else {
+                        Write-Log "ERROR (move failed) | $originalName" "ERROR"
+                    }
                 }
             }
             if ($moved -gt 0) { Write-Log "  → Moved $moved file(s) → $finalDir" }
