@@ -1,6 +1,6 @@
 # ⚠️ DEPRECATED: USE [TIFF-WORKFLOW](https://github.com/rsilvabr/tiff-workflow) INSTEAD
 
-This repository is **no longer maintained**. The project has been superseded by **jxl-photo**, which:
+This repository is **no longer maintained**. The project has been superseded by **tiff-workflow**, which:
 
 - Implements **all** features from this version
 - **Fixes known bugs** that were never addressed here
